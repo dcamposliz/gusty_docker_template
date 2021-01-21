@@ -1,0 +1,61 @@
+version: '3.3'
+services:
+    postgres:
+        image: postgres:13.1
+        environment:
+            - POSTGRES_USER=${DEFAULT_USER}
+            - POSTGRES_PASSWORD=${DEFAULT_PASSWORD}
+            - POSTGRES_DB=airflow
+        ports:
+            - "5678:5432"
+    airflow:
+        build:
+            context: ./airflow
+        environment:
+                - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://${DEFAULT_USER}:${DEFAULT_PASSWORD}@postgres:5432/airflow
+                - AIRFLOW_CONN_POSTGRES_DEFAULT=postgresql://${DEFAULT_USER}:${DEFAULT_PASSWORD}@postgres:5432/datawarehouse
+                - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+                - AIRFLOW__WEBSERVER__SECRET_KEY=${SECRET_KEY}
+                - DEFAULT_USER=${DEFAULT_USER}
+                - DEFAULT_PASSWORD=${DEFAULT_PASSWORD}
+                - AWS_USER=${AWS_USER}
+                - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+        command: >
+            /bin/bash -c "
+                # Wait for PG
+                sleep 5
+
+                # Clean up pid
+                rm -f airflow-webserver.pid
+
+                # Set up metadata database
+                airflow db upgrade
+
+                # Create default user
+                airflow users create \
+                  --username ${DEFAULT_USER} \
+                  --password ${DEFAULT_PASSWORD} \
+                  --email ${DEFAULT_USER}@gusty.com \
+                  --firstname Default \
+                  --lastname User \
+                  --role Admin
+
+                # Set up datalake db & views schema
+            	  python3 demo-setup/datawarehouse_setup.py
+
+                # Start airflow
+                airflow scheduler &
+            	  airflow webserver
+
+                # Keep the server on no matter what
+                sleep infinity
+            "
+        restart: always
+        depends_on:
+            - postgres
+        volumes:
+                - ./airflow:/usr/local/airflow
+        ports:
+            - "80:8080"
